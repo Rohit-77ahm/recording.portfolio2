@@ -1,31 +1,33 @@
 
+"use strict";
+
 // =========================================================
 // TOBI — PORTFOLIO CAROUSEL
-// Add another video by adding one object to VIDEOS below.
+// YouTube embeds, looping carousel, lightbox, and interactions.
+// Replace each VIDEO_ID below with the ID from your YouTube URL.
+// Example: youtube.com/watch?v=abcdefghijk -> abcdefghijk
 // =========================================================
-
 
 const VIDEOS = [
   {
     title: "Minecraft Cinematic",
     description: "Cinematic camera work and smooth movement.",
-    src: "videos/recording2.mp4",
-    type: "mp4"
+    src: "SAARxlMABgk",
+    type: "youtube"
   },
   {
     title: "Minecraft Film",
     description: "Captured moments from another perspective.",
-    src: "videos/recording3.mp4",
-    type: "mp4"
+    src: "Zaad-IAgaB8",
+    type: "youtube"
   },
   {
     title: "Minecraft Cinematic",
     description: "Captured moments from another perspective.",
-    src: "videos/recording1.mp4",
-    type: "mp4"
+    src: "iiD-87wwQWA",
+    type: "youtube"
   }
 ];
-
 
 const DISCORD_USERNAME = "tobiunphased";
 const TRANSITION_MS = 650;
@@ -63,6 +65,7 @@ let currentIndex = 0;
 let isAnimating = false;
 let animationTimer = null;
 let lightboxReturnFocus = null;
+
 let touchStartX = 0;
 let touchStartY = 0;
 let dragStartX = 0;
@@ -86,33 +89,54 @@ function modulo(number, length) {
   return ((number % length) + length) % length;
 }
 
-function getYouTubeId(url) {
+function getYouTubeId(value) {
+  if (!value || typeof value !== "string") return null;
+
+  // Accept a direct 11-character YouTube video ID.
+  if (/^[\w-]{11}$/.test(value)) {
+    return value;
+  }
+
+  // Also accept complete YouTube URLs.
   try {
-    const parsed = new URL(url);
-    if (parsed.hostname.includes("youtu.be")) {
-      return parsed.pathname.slice(1);
-    }
+    const parsed = new URL(value);
+    const hostname = parsed.hostname.toLowerCase();
+    let id = null;
 
-    if (parsed.hostname.includes("youtube.com")) {
+    if (
+      hostname === "youtu.be" ||
+      hostname.endsWith(".youtu.be")
+    ) {
+      id = parsed.pathname.split("/").filter(Boolean)[0] || null;
+    } else if (
+      hostname.includes("youtube.com") ||
+      hostname.includes("youtube-nocookie.com")
+    ) {
       if (parsed.pathname === "/watch") {
-        return parsed.searchParams.get("v");
+        id = parsed.searchParams.get("v");
+      } else {
+        const match = parsed.pathname.match(
+          /\/(?:embed|shorts|live)\/([^/?]+)/
+        );
+        id = match ? match[1] : null;
       }
-
-      const match = parsed.pathname.match(/\/(?:embed|shorts)\/([^/?]+)/);
-      return match ? match[1] : null;
     }
+
+    return id && /^[\w-]{11}$/.test(id) ? id : null;
   } catch {
     return null;
   }
-
-  return null;
 }
 
-function getYouTubeEmbedUrl(url) {
-  const id = getYouTubeId(url);
-  return id
-    ? `https://www.youtube-nocookie.com/embed/${encodeURIComponent(id)}?autoplay=1&rel=0`
-    : null;
+function getYouTubeEmbedUrl(value) {
+  const id = getYouTubeId(value);
+
+  if (!id) return null;
+
+  return (
+    `https://www.youtube-nocookie.com/embed/${id}` +
+    "?autoplay=1&rel=0&playsinline=1"
+  );
 }
 
 function getVideoType(video) {
@@ -130,6 +154,7 @@ function createPlayIcon() {
 
 function createSlide(offset) {
   const slide = document.createElement("article");
+
   slide.className = "carousel-slide";
   slide.dataset.offset = String(offset);
 
@@ -187,13 +212,18 @@ function updateSlideContent(slide, index) {
 
   slide.dataset.index = String(index);
 
-  $(".poster-number", slide).textContent = `FILM / ${padNumber(index + 1)}`;
-  $(".video-number", slide).textContent = `NO. ${padNumber(index + 1)}`;
+  $(".poster-number", slide).textContent =
+    `FILM / ${padNumber(index + 1)}`;
+
+  $(".video-number", slide).textContent =
+    `NO. ${padNumber(index + 1)}`;
+
   $(".video-heading", slide).textContent = video.title;
-  $(".video-description", slide).textContent = video.description;
+  $(".video-description", slide).textContent = video.description || "";
   $(".video-type", slide).textContent = getVideoType(video);
 
   const playButton = $(".play-button", slide);
+
   playButton.setAttribute("aria-label", `Play ${video.title}`);
 
   if (video.poster) {
@@ -215,7 +245,12 @@ function updateSlideContent(slide, index) {
 function setSlidePosition(slide, offset, animate = true) {
   slide.dataset.offset = String(offset);
 
-  slide.classList.remove("is-active", "is-prev", "is-next", "is-hidden");
+  slide.classList.remove(
+    "is-active",
+    "is-prev",
+    "is-next",
+    "is-hidden"
+  );
 
   if (!animate) {
     slide.style.transition = "none";
@@ -226,7 +261,7 @@ function setSlidePosition(slide, offset, animate = true) {
   if (offset === 0) {
     slide.classList.add("is-active");
     slide.setAttribute("aria-current", "true");
-    slide.setAttribute("aria-label", `Current slide`);
+    slide.setAttribute("aria-label", "Current slide");
     $(".play-button", slide).disabled = false;
   } else if (offset === -1) {
     slide.classList.add("is-prev");
@@ -244,7 +279,6 @@ function setSlidePosition(slide, offset, animate = true) {
     $(".play-button", slide).disabled = true;
   }
 
-  // Side slides are navigation targets, not playable videos.
   if (offset !== 0) {
     slide.setAttribute("role", "button");
     slide.setAttribute("tabindex", "0");
@@ -259,8 +293,11 @@ function updateCounter() {
   totalCounter.textContent = padNumber(VIDEOS.length);
 
   $$(".carousel-dot", indicators).forEach((dot, index) => {
-    const active = index === currentIndex;
-    dot.setAttribute("aria-current", String(active));
+    dot.setAttribute(
+      "aria-current",
+      String(index === currentIndex)
+    );
+
     dot.setAttribute(
       "aria-label",
       `Go to slide ${index + 1}: ${VIDEOS[index].title}`
@@ -273,11 +310,22 @@ function createIndicators() {
 
   VIDEOS.forEach((video, index) => {
     const dot = document.createElement("button");
+
     dot.className = "carousel-dot";
     dot.type = "button";
-    dot.setAttribute("aria-label", `Go to slide ${index + 1}: ${video.title}`);
-    dot.setAttribute("aria-current", String(index === currentIndex));
+
+    dot.setAttribute(
+      "aria-label",
+      `Go to slide ${index + 1}: ${video.title}`
+    );
+
+    dot.setAttribute(
+      "aria-current",
+      String(index === currentIndex)
+    );
+
     dot.addEventListener("click", () => goTo(index));
+
     indicators.append(dot);
   });
 }
@@ -285,8 +333,6 @@ function createIndicators() {
 function renderInitialSlides() {
   stage.replaceChildren();
 
-  // Three visual slots let a two-video carousel show the same neighbor
-  // on both sides while still looping cleanly.
   [-1, 0, 1].forEach(offset => {
     const slide = createSlide(offset);
     const index = modulo(currentIndex + offset, VIDEOS.length);
@@ -296,7 +342,6 @@ function renderInitialSlides() {
     stage.append(slide);
   });
 
-  // Allow the browser to apply the initial no-transition positions.
   requestAnimationFrame(() => {
     $$(".carousel-slide", stage).forEach(slide => {
       slide.style.removeProperty("transition");
@@ -312,11 +357,16 @@ function goTo(index) {
   if (VIDEOS.length < 2 || isAnimating) return;
 
   const target = modulo(index, VIDEOS.length);
+
   if (target === currentIndex) return;
 
-  // Choose the shortest route around the loop.
-  const forwardDistance = modulo(target - currentIndex, VIDEOS.length);
-  const direction = forwardDistance <= VIDEOS.length / 2 ? 1 : -1;
+  const forwardDistance = modulo(
+    target - currentIndex,
+    VIDEOS.length
+  );
+
+  const direction =
+    forwardDistance <= VIDEOS.length / 2 ? 1 : -1;
 
   moveCarousel(direction);
 }
@@ -329,32 +379,35 @@ function moveCarousel(direction) {
 
   const slides = $$(".carousel-slide", stage);
 
-  // Shift each existing slide one position, animating the active slide
-  // into its new side position and the destination into the center.
   slides.forEach(slide => {
     const oldOffset = Number(slide.dataset.offset);
     setSlidePosition(slide, oldOffset - direction, true);
   });
 
-  currentIndex = modulo(currentIndex + direction, VIDEOS.length);
+  currentIndex = modulo(
+    currentIndex + direction,
+    VIDEOS.length
+  );
+
   updateCounter();
 
   const finishTransition = () => {
     window.clearTimeout(animationTimer);
 
-    // Recycle the slide that has moved offstage into the far side slot.
     const recycled = slides.find(slide =>
       Number(slide.dataset.offset) === -2 * direction
     );
 
     if (recycled) {
       const newOffset = direction;
-      const newIndex = modulo(currentIndex + newOffset, VIDEOS.length);
+      const newIndex = modulo(
+        currentIndex + newOffset,
+        VIDEOS.length
+      );
 
       setSlidePosition(recycled, newOffset, false);
       updateSlideContent(recycled, newIndex);
 
-      // Force the new content to settle before restoring transitions.
       void recycled.offsetWidth;
       recycled.style.removeProperty("transition");
     }
@@ -369,31 +422,46 @@ function moveCarousel(direction) {
   if (prefersReducedMotion.matches) {
     finishTransition();
   } else {
-    animationTimer = window.setTimeout(finishTransition, TRANSITION_MS);
+    animationTimer = window.setTimeout(
+      finishTransition,
+      TRANSITION_MS
+    );
   }
 }
 
 function jumpTo(index) {
   if (isAnimating) return;
+
   const target = modulo(index, VIDEOS.length);
+
   if (target === currentIndex) return;
 
-  const forward = modulo(target - currentIndex, VIDEOS.length);
-  const backward = modulo(currentIndex - target, VIDEOS.length);
+  const forward = modulo(
+    target - currentIndex,
+    VIDEOS.length
+  );
 
-  goTo(target);
+  const backward = modulo(
+    currentIndex - target,
+    VIDEOS.length
+  );
 
-  // For longer jumps, finish one move before queuing the next.
+  const direction = forward <= backward ? 1 : -1;
   const remaining = Math.min(forward, backward) - 1;
+
+  moveCarousel(direction);
+
   if (remaining > 0) {
-    const direction = forward <= backward ? 1 : -1;
     const queueStep = () => {
       if (isAnimating) {
         window.setTimeout(queueStep, TRANSITION_MS + 20);
         return;
       }
 
-      if (currentIndex !== target) moveCarousel(direction);
+      if (currentIndex !== target) {
+        moveCarousel(direction);
+        window.setTimeout(queueStep, TRANSITION_MS + 20);
+      }
     };
 
     window.setTimeout(queueStep, TRANSITION_MS + 20);
@@ -403,24 +471,8 @@ function jumpTo(index) {
 prevButton.addEventListener("click", () => moveCarousel(-1));
 nextButton.addEventListener("click", () => moveCarousel(1));
 
-/* Keyboard navigation only runs when the carousel itself or one of its
-   controls has focus, or while the carousel is visible in the viewport. */
 carousel.addEventListener("keydown", event => {
   if (lightbox.classList.contains("open")) return;
-
-  if (event.key === "ArrowLeft") {
-    event.preventDefault();
-    moveCarousel(-1);
-  } else if (event.key === "ArrowRight") {
-    event.preventDefault();
-    moveCarousel(1);
-  }
-});
-
-document.addEventListener("keydown", event => {
-  if (lightbox.classList.contains("open")) return;
-
-  if (!carousel.contains(document.activeElement)) return;
 
   if (event.key === "ArrowLeft") {
     event.preventDefault();
@@ -442,14 +494,16 @@ stage.addEventListener("pointerdown", event => {
   lastPointerX = event.clientX;
   touchStartX = event.clientX;
   touchStartY = event.clientY;
+
   isDragging = true;
   hasDragged = false;
+
   stage.classList.add("dragging");
 
   try {
     stage.setPointerCapture(event.pointerId);
   } catch {
-    // Pointer capture is not supported by every browser.
+    // Pointer capture may not be supported.
   }
 });
 
@@ -461,7 +515,10 @@ stage.addEventListener("pointermove", event => {
   const deltaX = event.clientX - dragStartX;
   const deltaY = event.clientY - touchStartY;
 
-  if (Math.abs(deltaX) > 8 && Math.abs(deltaX) > Math.abs(deltaY)) {
+  if (
+    Math.abs(deltaX) > 8 &&
+    Math.abs(deltaX) > Math.abs(deltaY)
+  ) {
     hasDragged = true;
   }
 });
@@ -475,15 +532,19 @@ function finishPointer(event) {
   isDragging = false;
   stage.classList.remove("dragging");
 
-  if (hasDragged && Math.abs(deltaX) > 45 && Math.abs(deltaX) > Math.abs(deltaY)) {
+  if (
+    hasDragged &&
+    Math.abs(deltaX) > 45 &&
+    Math.abs(deltaX) > Math.abs(deltaY)
+  ) {
     moveCarousel(deltaX < 0 ? 1 : -1);
   }
 
   pointerId = null;
 
-  // Prevent the click following a drag from activating a side slide.
   if (hasDragged) {
     lastClickTime = Date.now();
+
     window.setTimeout(() => {
       hasDragged = false;
     }, 80);
@@ -492,21 +553,26 @@ function finishPointer(event) {
 
 stage.addEventListener("pointerup", finishPointer);
 stage.addEventListener("pointercancel", finishPointer);
+
 stage.addEventListener("lostpointercapture", () => {
   isDragging = false;
   stage.classList.remove("dragging");
 });
 
-stage.addEventListener("click", event => {
-  if (Date.now() - lastClickTime < 120) {
-    event.preventDefault();
-    event.stopPropagation();
-  }
-}, true);
+stage.addEventListener(
+  "click",
+  event => {
+    if (Date.now() - lastClickTime < 120) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  },
+  true
+);
 
-// Make dimmed slides keyboard-accessible as navigation controls.
 stage.addEventListener("keydown", event => {
   const slide = event.target.closest(".carousel-slide");
+
   if (!slide || slide.classList.contains("is-active")) return;
 
   if (event.key === "Enter" || event.key === " ") {
@@ -515,105 +581,165 @@ stage.addEventListener("keydown", event => {
   }
 });
 
-// ---------- Lightbox and video playback ----------
+// ---------- Lightbox and YouTube playback ----------
 
 function pauseLightboxMedia() {
+  if (!lightboxPlayer) return;
+
   const video = $("video", lightboxPlayer);
+
   if (video) {
     video.pause();
     video.removeAttribute("src");
     video.load();
   }
 
+  // Removing the iframe stops the embedded YouTube video.
   lightboxPlayer.replaceChildren();
 }
 
 function openLightbox(index) {
   const video = VIDEOS[index];
-  if (!video) return;
+
+  if (!video || !lightbox || !lightboxPlayer) return;
+
+  const embedUrl = getYouTubeEmbedUrl(video.src);
+
+  if (video.type === "youtube" && !embedUrl) {
+    if (lightboxTitle) {
+      lightboxTitle.textContent = "Check YouTube video ID";
+    }
+
+    if (lightboxLabel) {
+      lightboxLabel.textContent =
+        "Replace the placeholder with a valid 11-character video ID.";
+    }
+
+    return;
+  }
+
+  lightboxReturnFocus = document.activeElement;
 
   pauseLightboxMedia();
 
-  lightboxReturnFocus = document.activeElement;
   lightboxTitle.textContent = video.title;
-  lightboxLabel.textContent = `FEATURED RECORDING / ${padNumber(index + 1)}`;
+
+  if (lightboxLabel) {
+    lightboxLabel.textContent = video.description || "TOBIUNPHASED / FILM";
+  }
 
   if (video.type === "youtube") {
-    const embedUrl = getYouTubeEmbedUrl(video.src);
-
-    if (!embedUrl) {
-      lightboxTitle.textContent = "Invalid YouTube link";
-      return;
-    }
-
     const iframe = document.createElement("iframe");
+
     iframe.src = embedUrl;
     iframe.title = video.title;
-    iframe.allow = "accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share";
+    iframe.allow =
+      "accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share";
     iframe.allowFullscreen = true;
     iframe.loading = "eager";
-    lightboxPlayer.append(iframe);
-  } else {
+    iframe.referrerPolicy = "strict-origin-when-cross-origin";
+
+    iframe.style.display = "block";
+    iframe.style.width = "100%";
+    iframe.style.height = "100%";
+    iframe.style.aspectRatio = "16 / 9";
+    iframe.style.border = "0";
+
+    lightboxPlayer.appendChild(iframe);
+  } else if (video.type === "mp4") {
+    // Kept as a fallback in case you intentionally use an MP4 later.
     const player = document.createElement("video");
+
+    player.src = video.src;
     player.controls = true;
     player.autoplay = true;
     player.playsInline = true;
-    player.preload = "none";
-    player.src = video.src;
 
-    if (video.poster) player.poster = video.poster;
+    if (video.poster) {
+      player.poster = video.poster;
+    }
 
-    lightboxPlayer.append(player);
-    player.play().catch(() => {
-      // Controls remain available if autoplay is blocked by the browser.
-    });
+    lightboxPlayer.appendChild(player);
   }
 
-  lightbox.classList.add("open");
+  // Support both class names in case the existing CSS uses either one.
+  lightbox.classList.add("open", "active");
   lightbox.setAttribute("aria-hidden", "false");
   document.body.classList.add("lightbox-open");
-  lightboxClose.focus();
+
+  if (lightboxClose) {
+    lightboxClose.focus();
+  }
 }
 
 function closeLightbox() {
-  if (!lightbox.classList.contains("open")) return;
+  if (!lightbox) return;
 
   pauseLightboxMedia();
-  lightbox.classList.remove("open");
+
+  lightbox.classList.remove("open", "active");
   lightbox.setAttribute("aria-hidden", "true");
   document.body.classList.remove("lightbox-open");
 
-  if (lightboxReturnFocus && typeof lightboxReturnFocus.focus === "function") {
+  if (
+    lightboxReturnFocus &&
+    typeof lightboxReturnFocus.focus === "function"
+  ) {
     lightboxReturnFocus.focus();
   }
+
+  lightboxReturnFocus = null;
 }
 
-lightboxClose.addEventListener("click", closeLightbox);
+if (lightboxClose) {
+  lightboxClose.addEventListener("click", closeLightbox);
+}
 
-$("[data-close-lightbox]", lightbox).addEventListener("click", closeLightbox);
+const lightboxBackdrop = $("[data-close-lightbox]", lightbox);
+
+if (lightboxBackdrop) {
+  lightboxBackdrop.addEventListener("click", event => {
+    // Close only when the backdrop itself is clicked.
+    if (event.target === lightboxBackdrop) {
+      closeLightbox();
+    }
+  });
+}
 
 document.addEventListener("keydown", event => {
   if (event.key === "Escape") {
-    if (lightbox.classList.contains("open")) {
+    if (lightbox && lightbox.classList.contains("open")) {
       closeLightbox();
-    } else if (mobileMenu.classList.contains("open")) {
+    } else if (mobileMenu && mobileMenu.classList.contains("open")) {
       closeMobileMenu();
     }
   }
 
-  if (event.key === "Tab" && lightbox.classList.contains("open")) {
-    const focusable = $$("button, a, iframe, video", lightbox)
-      .filter(element => !element.disabled);
+  if (
+    event.key === "Tab" &&
+    lightbox &&
+    lightbox.classList.contains("open")
+  ) {
+    const focusable = $$(
+      "button, a, iframe, video",
+      lightbox
+    ).filter(element => !element.disabled);
 
     if (!focusable.length) return;
 
     const first = focusable[0];
     const last = focusable[focusable.length - 1];
 
-    if (event.shiftKey && document.activeElement === first) {
+    if (
+      event.shiftKey &&
+      document.activeElement === first
+    ) {
       event.preventDefault();
       last.focus();
-    } else if (!event.shiftKey && document.activeElement === last) {
+    } else if (
+      !event.shiftKey &&
+      document.activeElement === last
+    ) {
       event.preventDefault();
       first.focus();
     }
@@ -623,105 +749,163 @@ document.addEventListener("keydown", event => {
 // ---------- Mobile navigation ----------
 
 function openMobileMenu() {
+  if (!mobileMenu) return;
+
   mobileMenu.classList.add("open");
   mobileMenu.setAttribute("aria-hidden", "false");
-  menuToggle.setAttribute("aria-expanded", "true");
+
+  if (menuToggle) {
+    menuToggle.setAttribute("aria-expanded", "true");
+  }
+
   document.body.classList.add("menu-open");
 
   const firstLink = $("nav a", mobileMenu);
-  if (firstLink) firstLink.focus();
+
+  if (firstLink) {
+    firstLink.focus();
+  }
 }
 
 function closeMobileMenu() {
-  if (!mobileMenu.classList.contains("open")) return;
+  if (!mobileMenu || !mobileMenu.classList.contains("open")) return;
 
   mobileMenu.classList.remove("open");
   mobileMenu.setAttribute("aria-hidden", "true");
-  menuToggle.setAttribute("aria-expanded", "false");
+
+  if (menuToggle) {
+    menuToggle.setAttribute("aria-expanded", "false");
+    menuToggle.focus();
+  }
+
   document.body.classList.remove("menu-open");
-  menuToggle.focus();
 }
 
-menuToggle.addEventListener("click", openMobileMenu);
-menuClose.addEventListener("click", closeMobileMenu);
+if (menuToggle) {
+  menuToggle.addEventListener("click", openMobileMenu);
+}
 
-$$(".mobile-menu-links a", mobileMenu).forEach(link => {
-  link.addEventListener("click", () => {
-    mobileMenu.classList.remove("open");
-    mobileMenu.setAttribute("aria-hidden", "true");
-    menuToggle.setAttribute("aria-expanded", "false");
-    document.body.classList.remove("menu-open");
+if (menuClose) {
+  menuClose.addEventListener("click", closeMobileMenu);
+}
+
+if (mobileMenu) {
+  $$(".mobile-menu-links a", mobileMenu).forEach(link => {
+    link.addEventListener("click", () => {
+      mobileMenu.classList.remove("open");
+      mobileMenu.setAttribute("aria-hidden", "true");
+
+      if (menuToggle) {
+        menuToggle.setAttribute("aria-expanded", "false");
+      }
+
+      document.body.classList.remove("menu-open");
+    });
   });
-});
+}
 
 // ---------- Discord copy button ----------
 
-copyButton.addEventListener("click", async () => {
-  try {
-    await navigator.clipboard.writeText(DISCORD_USERNAME);
-    copyLabel.textContent = "COPIED ✓";
-    copyFeedback.textContent = "Username copied";
-  } catch {
-    // Fallback for contexts where the Clipboard API is unavailable.
-    const input = document.createElement("textarea");
-    input.value = DISCORD_USERNAME;
-    input.setAttribute("readonly", "");
-    input.style.position = "fixed";
-    input.style.opacity = "0";
-    document.body.append(input);
-    input.select();
+if (copyButton) {
+  copyButton.addEventListener("click", async () => {
+    let copied = false;
 
-    const copied = document.execCommand("copy");
-    input.remove();
+    try {
+      await navigator.clipboard.writeText(DISCORD_USERNAME);
+      copied = true;
+    } catch {
+      // Fallback for browsers without Clipboard API access.
+      const input = document.createElement("textarea");
 
-    copyLabel.textContent = copied ? "COPIED ✓" : "COPY ↗";
-    copyFeedback.textContent = copied
-      ? "Username copied"
-      : "Copy unavailable — tobiunphased";
-  }
+      input.value = DISCORD_USERNAME;
+      input.setAttribute("readonly", "");
+      input.style.position = "fixed";
+      input.style.opacity = "0";
 
-  window.setTimeout(() => {
-    copyLabel.textContent = "COPY ↗";
-    copyFeedback.textContent = "";
-  }, 2200);
-});
+      document.body.append(input);
+      input.select();
+
+      copied = document.execCommand("copy");
+      input.remove();
+    }
+
+    if (copyLabel) {
+      copyLabel.textContent = copied ? "COPIED ✓" : "COPY ↗";
+    }
+
+    if (copyFeedback) {
+      copyFeedback.textContent = copied
+        ? "Username copied"
+        : "Copy unavailable — tobiunphased";
+    }
+
+    window.setTimeout(() => {
+      if (copyLabel) copyLabel.textContent = "COPY ↗";
+      if (copyFeedback) copyFeedback.textContent = "";
+    }, 2200);
+  });
+}
 
 // ---------- Scroll effects ----------
 
 function updateScrollEffects() {
-  const scrollable = document.documentElement.scrollHeight - window.innerHeight;
-  const progress = scrollable > 0 ? (window.scrollY / scrollable) * 100 : 0;
+  const scrollable =
+    document.documentElement.scrollHeight - window.innerHeight;
 
-  progressBar.style.width = `${progress}%`;
-  header.classList.toggle("scrolled", window.scrollY > 20);
+  const progress =
+    scrollable > 0 ? (window.scrollY / scrollable) * 100 : 0;
+
+  if (progressBar) {
+    progressBar.style.width = `${progress}%`;
+  }
+
+  if (header) {
+    header.classList.toggle("scrolled", window.scrollY > 20);
+  }
 }
 
-window.addEventListener("scroll", updateScrollEffects, { passive: true });
+window.addEventListener("scroll", updateScrollEffects, {
+  passive: true
+});
+
 updateScrollEffects();
 
-// Reveal sections when they enter the viewport.
-if ("IntersectionObserver" in window) {
-  const revealObserver = new IntersectionObserver(entries => {
-    entries.forEach(entry => {
-      if (entry.isIntersecting) {
-        entry.target.classList.add("visible");
-        revealObserver.unobserve(entry.target);
-      }
-    });
-  }, { threshold: 0.12 });
+// ---------- Reveal sections ----------
 
-  $$(".reveal").forEach(element => revealObserver.observe(element));
+if ("IntersectionObserver" in window) {
+  const revealObserver = new IntersectionObserver(
+    entries => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          entry.target.classList.add("visible");
+          revealObserver.unobserve(entry.target);
+        }
+      });
+    },
+    { threshold: 0.12 }
+  );
+
+  $$(".reveal").forEach(element => {
+    revealObserver.observe(element);
+  });
 } else {
-  $$(".reveal").forEach(element => element.classList.add("visible"));
+  $$(".reveal").forEach(element => {
+    element.classList.add("visible");
+  });
 }
 
-// Optional subtle cursor dot on desktop devices.
+// ---------- Custom cursor ----------
+
 if (cursorDot && window.matchMedia("(pointer: fine)").matches) {
-  window.addEventListener("mousemove", event => {
-    cursorDot.style.opacity = "0.65";
-    cursorDot.style.transform =
-      `translate(${event.clientX - 2}px, ${event.clientY - 2}px)`;
-  }, { passive: true });
+  window.addEventListener(
+    "mousemove",
+    event => {
+      cursorDot.style.opacity = "0.65";
+      cursorDot.style.transform =
+        `translate(${event.clientX - 2}px, ${event.clientY - 2}px)`;
+    },
+    { passive: true }
+  );
 
   document.addEventListener("mouseleave", () => {
     cursorDot.style.opacity = "0";
@@ -730,9 +914,17 @@ if (cursorDot && window.matchMedia("(pointer: fine)").matches) {
 
 // ---------- Initialize ----------
 
-if (VIDEOS.length === 0) {
-  carousel.hidden = true;
-} else {
+if (!VIDEOS.length) {
+  if (carousel) carousel.hidden = true;
+} else if (
+  carousel &&
+  stage &&
+  indicators &&
+  currentCounter &&
+  totalCounter &&
+  prevButton &&
+  nextButton
+) {
   createIndicators();
   renderInitialSlides();
 }
