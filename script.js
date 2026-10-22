@@ -26,6 +26,12 @@ const VIDEOS = [
     description: "Captured moments from another perspective.",
     src: "iiD-87wwQWA",
     type: "youtube"
+  },
+  {
+    title: "Minecraft Cinematic",
+    description: "i'm going back to 505.",
+    src: "r_hkoqetm_8",
+    type: "youtube"
   }
 ];
 
