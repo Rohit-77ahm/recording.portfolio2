@@ -12,7 +12,7 @@ const VIDEOS = [
   {
     title: "Minecraft Cinematic",
     description: "Cinematic camera work and smooth movement.",
-    src: "SAARxlMABgk",
+    src: "ZLHp3N7IjsI",
     type: "youtube"
   },
   {
@@ -24,7 +24,7 @@ const VIDEOS = [
   {
     title: "Minecraft Cinematic",
     description: "Captured moments from another perspective.",
-    src: "iiD-87wwQWA",
+    src: "SAARxlMABgk",
     type: "youtube"
   },
   {
