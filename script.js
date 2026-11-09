@@ -1,11 +1,9 @@
-
 "use strict";
 
 // =========================================================
-// TOBI — PORTFOLIO CAROUSEL
-// YouTube embeds, looping carousel, lightbox, and interactions.
-// Replace each VIDEO_ID below with the ID from your YouTube URL.
-// Example: youtube.com/watch?v=abcdefghijk -> abcdefghijk
+// TOBI. — STUDIO PORTFOLIO
+// Vanilla JavaScript. No framework, build step or storage.
+// The four original YouTube IDs and titles are preserved.
 // =========================================================
 
 const VIDEOS = [
@@ -37,18 +35,17 @@ const VIDEOS = [
 
 const DISCORD_USERNAME = "tobiunphased";
 const TRANSITION_MS = 650;
-
-const $ = (selector, root = document) => root.querySelector(selector);
-const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
+const $ = (selector, root = document) => root?.querySelector(selector) ?? null;
+const $$ = (selector, root = document) => root ? [...root.querySelectorAll(selector)] : [];
 
 const header = $("#site-header");
 const progressBar = $("#scroll-progress");
 const cursorDot = $("#cursor-dot");
-
+const announcement = $("#announcement");
+const announcementClose = $("#announcement-close");
 const menuToggle = $("#menu-toggle");
 const menuClose = $("#menu-close");
 const mobileMenu = $("#mobile-menu");
-
 const carousel = $("#video-carousel");
 const stage = $("#carousel-stage");
 const prevButton = $("#carousel-prev");
@@ -56,22 +53,22 @@ const nextButton = $("#carousel-next");
 const currentCounter = $("#carousel-current");
 const totalCounter = $("#carousel-total");
 const indicators = $("#carousel-indicators");
-
 const lightbox = $("#lightbox");
 const lightboxPlayer = $("#lightbox-player");
 const lightboxTitle = $("#lightbox-title");
 const lightboxLabel = $("#lightbox-label");
 const lightboxClose = $("#lightbox-close");
-
 const copyButton = $("#copy-discord");
 const copyLabel = $("#copy-label");
 const copyFeedback = $("#copy-feedback");
+const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+const finePointer = window.matchMedia("(pointer: fine)");
 
 let currentIndex = 0;
 let isAnimating = false;
 let animationTimer = null;
 let lightboxReturnFocus = null;
-
+let menuReturnFocus = null;
 let touchStartX = 0;
 let touchStartY = 0;
 let dragStartX = 0;
@@ -80,12 +77,10 @@ let hasDragged = false;
 let pointerId = null;
 let lastPointerX = 0;
 let lastClickTime = 0;
+let faqOpenButton = null;
+let scrollTicking = false;
 
-const prefersReducedMotion = window.matchMedia(
-  "(prefers-reduced-motion: reduce)"
-);
-
-// ---------- Helpers ----------
+// ---------- General helpers ----------
 
 function padNumber(number) {
   return String(number).padStart(2, "0");
@@ -97,22 +92,14 @@ function modulo(number, length) {
 
 function getYouTubeId(value) {
   if (!value || typeof value !== "string") return null;
+  if (/^[\w-]{11}$/.test(value)) return value;
 
-  // Accept a direct 11-character YouTube video ID.
-  if (/^[\w-]{11}$/.test(value)) {
-    return value;
-  }
-
-  // Also accept complete YouTube URLs.
   try {
     const parsed = new URL(value);
     const hostname = parsed.hostname.toLowerCase();
     let id = null;
 
-    if (
-      hostname === "youtu.be" ||
-      hostname.endsWith(".youtu.be")
-    ) {
+    if (hostname === "youtu.be" || hostname.endsWith(".youtu.be")) {
       id = parsed.pathname.split("/").filter(Boolean)[0] || null;
     } else if (
       hostname.includes("youtube.com") ||
@@ -121,9 +108,7 @@ function getYouTubeId(value) {
       if (parsed.pathname === "/watch") {
         id = parsed.searchParams.get("v");
       } else {
-        const match = parsed.pathname.match(
-          /\/(?:embed|shorts|live)\/([^/?]+)/
-        );
+        const match = parsed.pathname.match(/\/(?:embed|shorts|live)\/([^/?]+)/);
         id = match ? match[1] : null;
       }
     }
@@ -136,13 +121,23 @@ function getYouTubeId(value) {
 
 function getYouTubeEmbedUrl(value) {
   const id = getYouTubeId(value);
-
   if (!id) return null;
 
-  return (
-    `https://www.youtube-nocookie.com/embed/${id}` +
-    "?autoplay=1&rel=0&playsinline=1"
-  );
+  const params = new URLSearchParams({
+    autoplay: "1",
+    rel: "0",
+    playsinline: "1",
+    enablejsapi: "1"
+  });
+
+  if (
+    window.location.protocol === "http:" ||
+    window.location.protocol === "https:"
+  ) {
+    params.set("origin", window.location.origin);
+  }
+
+  return `https://www.youtube.com/embed/${id}?${params.toString()}`;
 }
 
 function getVideoType(video) {
@@ -156,11 +151,31 @@ function createPlayIcon() {
     </svg>`;
 }
 
-// ---------- Build slide markup ----------
+function setBannerHeight() {
+  const height = announcement && !announcement.classList.contains("is-dismissed")
+    ? `${announcement.getBoundingClientRect().height}px`
+    : "0px";
+  document.documentElement.style.setProperty("--banner-height", height);
+}
+
+// ---------- Announcement banner ----------
+
+if (announcementClose && announcement) {
+  announcementClose.addEventListener("click", () => {
+    announcement.classList.add("is-dismissed");
+    announcement.setAttribute("aria-hidden", "true");
+    announcementClose.disabled = true;
+    document.documentElement.style.setProperty("--banner-height", "0px");
+  });
+}
+
+setBannerHeight();
+window.addEventListener("resize", setBannerHeight, { passive: true });
+
+// ---------- Carousel slide construction ----------
 
 function createSlide(offset) {
   const slide = document.createElement("article");
-
   slide.className = "carousel-slide";
   slide.dataset.offset = String(offset);
 
@@ -168,7 +183,7 @@ function createSlide(offset) {
     <div class="video-card">
       <div class="video-visual">
         <div class="video-poster-fallback" aria-hidden="true"></div>
-        <img class="video-poster" alt="" draggable="false" hidden>
+        <img class="video-poster" alt="" draggable="false" hidden loading="lazy">
         <span class="poster-number"></span>
         <span class="poster-caption">TOBIUNPHASED / FILM</span>
         <button class="play-button" type="button" aria-label="Play featured video">
@@ -187,61 +202,55 @@ function createSlide(offset) {
 
   slide.addEventListener("click", () => {
     if (isDragging || hasDragged || isAnimating) return;
-
     const offsetValue = Number(slide.dataset.offset);
     const index = Number(slide.dataset.index);
-
-    if (offsetValue !== 0) {
-      goTo(index);
-    }
+    if (offsetValue !== 0) jumpTo(index);
   });
 
-  $(".play-button", slide).addEventListener("click", event => {
-    event.stopPropagation();
-
-    if (
-      Number(slide.dataset.offset) === 0 &&
-      !isAnimating &&
-      !hasDragged
-    ) {
-      openLightbox(Number(slide.dataset.index));
-    }
-  });
+  const playButton = $(".play-button", slide);
+  if (playButton) {
+    playButton.addEventListener("click", event => {
+      event.stopPropagation();
+      if (Number(slide.dataset.offset) === 0 && !isAnimating && !hasDragged) {
+        openLightbox(Number(slide.dataset.index));
+      }
+    });
+  }
 
   return slide;
 }
 
 function updateSlideContent(slide, index) {
   const video = VIDEOS[index];
+  if (!slide || !video) return;
+
   const poster = $(".video-poster", slide);
   const fallback = $(".video-poster-fallback", slide);
-
   slide.dataset.index = String(index);
 
-  $(".poster-number", slide).textContent =
-    `FILM / ${padNumber(index + 1)}`;
-
-  $(".video-number", slide).textContent =
-    `NO. ${padNumber(index + 1)}`;
-
-  $(".video-heading", slide).textContent = video.title;
-  $(".video-description", slide).textContent = video.description || "";
-  $(".video-type", slide).textContent = getVideoType(video);
-
+  const posterNumber = $(".poster-number", slide);
+  const videoNumber = $(".video-number", slide);
+  const heading = $(".video-heading", slide);
+  const description = $(".video-description", slide);
+  const videoType = $(".video-type", slide);
   const playButton = $(".play-button", slide);
 
-  playButton.setAttribute("aria-label", `Play ${video.title}`);
+  if (posterNumber) posterNumber.textContent = `FILM / ${padNumber(index + 1)}`;
+  if (videoNumber) videoNumber.textContent = `NO. ${padNumber(index + 1)}`;
+  if (heading) heading.textContent = video.title;
+  if (description) description.textContent = video.description || "";
+  if (videoType) videoType.textContent = getVideoType(video);
+  if (playButton) playButton.setAttribute("aria-label", `Play ${video.title}`);
 
-  if (video.poster) {
+  if (poster && fallback && video.poster) {
     poster.src = video.poster;
     poster.hidden = false;
     fallback.hidden = true;
-
     poster.onerror = () => {
       poster.hidden = true;
       fallback.hidden = false;
     };
-  } else {
+  } else if (poster && fallback) {
     poster.removeAttribute("src");
     poster.hidden = true;
     fallback.hidden = false;
@@ -249,600 +258,476 @@ function updateSlideContent(slide, index) {
 }
 
 function setSlidePosition(slide, offset, animate = true) {
+  if (!slide) return;
   slide.dataset.offset = String(offset);
+  slide.classList.remove("is-active", "is-prev", "is-next", "is-hidden");
+  slide.style.transition = animate ? "" : "none";
 
-  slide.classList.remove(
-    "is-active",
-    "is-prev",
-    "is-next",
-    "is-hidden"
-  );
-
-  if (!animate) {
-    slide.style.transition = "none";
-  } else {
-    slide.style.removeProperty("transition");
-  }
-
+  const playButton = $(".play-button", slide);
   if (offset === 0) {
     slide.classList.add("is-active");
     slide.setAttribute("aria-current", "true");
     slide.setAttribute("aria-label", "Current slide");
-    $(".play-button", slide).disabled = false;
+    slide.setAttribute("role", "group");
+    slide.setAttribute("tabindex", "-1");
+    if (playButton) playButton.disabled = false;
   } else if (offset === -1) {
     slide.classList.add("is-prev");
     slide.setAttribute("aria-current", "false");
     slide.setAttribute("aria-label", "Previous slide");
-    $(".play-button", slide).disabled = true;
+    slide.setAttribute("role", "button");
+    slide.setAttribute("tabindex", "0");
+    if (playButton) playButton.disabled = true;
   } else if (offset === 1) {
     slide.classList.add("is-next");
     slide.setAttribute("aria-current", "false");
     slide.setAttribute("aria-label", "Next slide");
-    $(".play-button", slide).disabled = true;
+    slide.setAttribute("role", "button");
+    slide.setAttribute("tabindex", "0");
+    if (playButton) playButton.disabled = true;
   } else {
     slide.classList.add("is-hidden");
     slide.setAttribute("aria-current", "false");
-    $(".play-button", slide).disabled = true;
-  }
-
-  if (offset !== 0) {
-    slide.setAttribute("role", "button");
-    slide.setAttribute("tabindex", "0");
-  } else {
     slide.setAttribute("role", "group");
     slide.setAttribute("tabindex", "-1");
+    if (playButton) playButton.disabled = true;
   }
 }
 
 function updateCounter() {
-  currentCounter.textContent = padNumber(currentIndex + 1);
-  totalCounter.textContent = padNumber(VIDEOS.length);
+  if (currentCounter) currentCounter.textContent = padNumber(currentIndex + 1);
+  if (totalCounter) totalCounter.textContent = padNumber(VIDEOS.length);
 
   $$(".carousel-dot", indicators).forEach((dot, index) => {
-    dot.setAttribute(
-      "aria-current",
-      String(index === currentIndex)
-    );
-
-    dot.setAttribute(
-      "aria-label",
-      `Go to slide ${index + 1}: ${VIDEOS[index].title}`
-    );
+    dot.setAttribute("aria-current", String(index === currentIndex));
+    dot.setAttribute("aria-label", `Go to slide ${index + 1}: ${VIDEOS[index].title}`);
   });
 }
 
 function createIndicators() {
+  if (!indicators) return;
   indicators.replaceChildren();
 
   VIDEOS.forEach((video, index) => {
     const dot = document.createElement("button");
-
     dot.className = "carousel-dot";
     dot.type = "button";
-
-    dot.setAttribute(
-      "aria-label",
-      `Go to slide ${index + 1}: ${video.title}`
-    );
-
-    dot.setAttribute(
-      "aria-current",
-      String(index === currentIndex)
-    );
-
-    dot.addEventListener("click", () => goTo(index));
-
+    dot.setAttribute("aria-label", `Go to slide ${index + 1}: ${video.title}`);
+    dot.setAttribute("aria-current", String(index === currentIndex));
+    dot.addEventListener("click", () => jumpTo(index));
     indicators.append(dot);
   });
 }
 
 function renderInitialSlides() {
+  if (!stage) return;
   stage.replaceChildren();
 
   [-1, 0, 1].forEach(offset => {
     const slide = createSlide(offset);
     const index = modulo(currentIndex + offset, VIDEOS.length);
-
     updateSlideContent(slide, index);
     setSlidePosition(slide, offset, false);
     stage.append(slide);
   });
 
   requestAnimationFrame(() => {
-    $$(".carousel-slide", stage).forEach(slide => {
-      slide.style.removeProperty("transition");
-    });
+    $$(".carousel-slide", stage).forEach(slide => slide.style.removeProperty("transition"));
   });
-
   updateCounter();
 }
 
 // ---------- Carousel navigation ----------
 
-function goTo(index) {
-  if (VIDEOS.length < 2 || isAnimating) return;
-
-  const target = modulo(index, VIDEOS.length);
-
-  if (target === currentIndex) return;
-
-  const forwardDistance = modulo(
-    target - currentIndex,
-    VIDEOS.length
-  );
-
-  const direction =
-    forwardDistance <= VIDEOS.length / 2 ? 1 : -1;
-
-  moveCarousel(direction);
-}
-
 function moveCarousel(direction) {
-  if (VIDEOS.length < 2 || isAnimating) return;
-
+  if (VIDEOS.length < 2 || !stage || isAnimating) return;
   isAnimating = true;
   pauseLightboxMedia();
 
   const slides = $$(".carousel-slide", stage);
-
   slides.forEach(slide => {
     const oldOffset = Number(slide.dataset.offset);
     setSlidePosition(slide, oldOffset - direction, true);
   });
 
-  currentIndex = modulo(
-    currentIndex + direction,
-    VIDEOS.length
-  );
-
+  currentIndex = modulo(currentIndex + direction, VIDEOS.length);
   updateCounter();
 
   const finishTransition = () => {
     window.clearTimeout(animationTimer);
-
-    const recycled = slides.find(slide =>
-      Number(slide.dataset.offset) === -2 * direction
-    );
+    const recycled = slides.find(slide => Number(slide.dataset.offset) === -2 * direction);
 
     if (recycled) {
       const newOffset = direction;
-      const newIndex = modulo(
-        currentIndex + newOffset,
-        VIDEOS.length
-      );
-
+      const newIndex = modulo(currentIndex + newOffset, VIDEOS.length);
       setSlidePosition(recycled, newOffset, false);
       updateSlideContent(recycled, newIndex);
-
       void recycled.offsetWidth;
       recycled.style.removeProperty("transition");
     }
 
-    slides.forEach(slide => {
-      slide.style.removeProperty("transition");
-    });
-
+    slides.forEach(slide => slide.style.removeProperty("transition"));
     isAnimating = false;
   };
 
   if (prefersReducedMotion.matches) {
     finishTransition();
   } else {
-    animationTimer = window.setTimeout(
-      finishTransition,
-      TRANSITION_MS
-    );
+    animationTimer = window.setTimeout(finishTransition, TRANSITION_MS);
   }
 }
 
 function jumpTo(index) {
-  if (isAnimating) return;
-
+  if (isAnimating || !VIDEOS.length) return;
   const target = modulo(index, VIDEOS.length);
-
   if (target === currentIndex) return;
 
-  const forward = modulo(
-    target - currentIndex,
-    VIDEOS.length
-  );
-
-  const backward = modulo(
-    currentIndex - target,
-    VIDEOS.length
-  );
-
+  const forward = modulo(target - currentIndex, VIDEOS.length);
+  const backward = modulo(currentIndex - target, VIDEOS.length);
   const direction = forward <= backward ? 1 : -1;
-  const remaining = Math.min(forward, backward) - 1;
+  const steps = Math.min(forward, backward);
+  let completed = 0;
 
-  moveCarousel(direction);
+  const step = () => {
+    if (isAnimating) {
+      window.setTimeout(step, prefersReducedMotion.matches ? 0 : TRANSITION_MS + 25);
+      return;
+    }
+    if (completed >= steps || currentIndex === target) return;
+    moveCarousel(direction);
+    completed += 1;
+    if (completed < steps) {
+      window.setTimeout(step, prefersReducedMotion.matches ? 0 : TRANSITION_MS + 25);
+    }
+  };
 
-  if (remaining > 0) {
-    const queueStep = () => {
-      if (isAnimating) {
-        window.setTimeout(queueStep, TRANSITION_MS + 20);
-        return;
-      }
-
-      if (currentIndex !== target) {
-        moveCarousel(direction);
-        window.setTimeout(queueStep, TRANSITION_MS + 20);
-      }
-    };
-
-    window.setTimeout(queueStep, TRANSITION_MS + 20);
-  }
+  step();
 }
 
-prevButton.addEventListener("click", () => moveCarousel(-1));
-nextButton.addEventListener("click", () => moveCarousel(1));
+if (prevButton) prevButton.addEventListener("click", () => moveCarousel(-1));
+if (nextButton) nextButton.addEventListener("click", () => moveCarousel(1));
 
-carousel.addEventListener("keydown", event => {
-  if (lightbox.classList.contains("open")) return;
-
-  if (event.key === "ArrowLeft") {
-    event.preventDefault();
-    moveCarousel(-1);
-  } else if (event.key === "ArrowRight") {
-    event.preventDefault();
-    moveCarousel(1);
-  }
-});
-
-// ---------- Swipe and click-drag ----------
-
-stage.addEventListener("pointerdown", event => {
-  if (event.target.closest("button")) return;
-  if (event.pointerType === "mouse" && event.button !== 0) return;
-
-  pointerId = event.pointerId;
-  dragStartX = event.clientX;
-  lastPointerX = event.clientX;
-  touchStartX = event.clientX;
-  touchStartY = event.clientY;
-
-  isDragging = true;
-  hasDragged = false;
-
-  stage.classList.add("dragging");
-
-  try {
-    stage.setPointerCapture(event.pointerId);
-  } catch {
-    // Pointer capture may not be supported.
-  }
-});
-
-stage.addEventListener("pointermove", event => {
-  if (!isDragging || event.pointerId !== pointerId) return;
-
-  lastPointerX = event.clientX;
-
-  const deltaX = event.clientX - dragStartX;
-  const deltaY = event.clientY - touchStartY;
-
-  if (
-    Math.abs(deltaX) > 8 &&
-    Math.abs(deltaX) > Math.abs(deltaY)
-  ) {
-    hasDragged = true;
-  }
-});
-
-function finishPointer(event) {
-  if (!isDragging || event.pointerId !== pointerId) return;
-
-  const deltaX = lastPointerX - touchStartX;
-  const deltaY = event.clientY - touchStartY;
-
-  isDragging = false;
-  stage.classList.remove("dragging");
-
-  if (
-    hasDragged &&
-    Math.abs(deltaX) > 45 &&
-    Math.abs(deltaX) > Math.abs(deltaY)
-  ) {
-    moveCarousel(deltaX < 0 ? 1 : -1);
-  }
-
-  pointerId = null;
-
-  if (hasDragged) {
-    lastClickTime = Date.now();
-
-    window.setTimeout(() => {
-      hasDragged = false;
-    }, 80);
-  }
+if (carousel) {
+  carousel.addEventListener("keydown", event => {
+    if (lightbox?.classList.contains("open")) return;
+    if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      moveCarousel(-1);
+    } else if (event.key === "ArrowRight") {
+      event.preventDefault();
+      moveCarousel(1);
+    }
+  });
 }
 
-stage.addEventListener("pointerup", finishPointer);
-stage.addEventListener("pointercancel", finishPointer);
+// ---------- Drag and swipe ----------
 
-stage.addEventListener("lostpointercapture", () => {
-  isDragging = false;
-  stage.classList.remove("dragging");
-});
+if (stage) {
+  stage.addEventListener("pointerdown", event => {
+    if (event.target.closest("button")) return;
+    if (event.pointerType === "mouse" && event.button !== 0) return;
 
-stage.addEventListener(
-  "click",
-  event => {
-    if (Date.now() - lastClickTime < 120) {
+    pointerId = event.pointerId;
+    dragStartX = event.clientX;
+    lastPointerX = event.clientX;
+    touchStartX = event.clientX;
+    touchStartY = event.clientY;
+    isDragging = true;
+    hasDragged = false;
+    stage.classList.add("dragging");
+
+    try {
+      stage.setPointerCapture(event.pointerId);
+    } catch {
+      // Pointer capture is optional; pointer events still work without it.
+    }
+  });
+
+  stage.addEventListener("pointermove", event => {
+    if (!isDragging || event.pointerId !== pointerId) return;
+    lastPointerX = event.clientX;
+    const deltaX = event.clientX - dragStartX;
+    const deltaY = event.clientY - touchStartY;
+    if (Math.abs(deltaX) > 8 && Math.abs(deltaX) > Math.abs(deltaY)) hasDragged = true;
+  });
+
+  function finishPointer(event) {
+    if (!isDragging || event.pointerId !== pointerId) return;
+    const deltaX = lastPointerX - touchStartX;
+    const deltaY = event.clientY - touchStartY;
+    isDragging = false;
+    stage.classList.remove("dragging");
+
+    if (hasDragged && Math.abs(deltaX) > 45 && Math.abs(deltaX) > Math.abs(deltaY)) {
+      moveCarousel(deltaX < 0 ? 1 : -1);
+    }
+
+    pointerId = null;
+    if (hasDragged) {
+      lastClickTime = Date.now();
+      window.setTimeout(() => { hasDragged = false; }, 100);
+    }
+  }
+
+  stage.addEventListener("pointerup", finishPointer);
+  stage.addEventListener("pointercancel", finishPointer);
+  stage.addEventListener("lostpointercapture", () => {
+    isDragging = false;
+    stage.classList.remove("dragging");
+  });
+
+  stage.addEventListener("click", event => {
+    if (Date.now() - lastClickTime < 140) {
       event.preventDefault();
       event.stopPropagation();
     }
-  },
-  true
-);
+  }, true);
 
-stage.addEventListener("keydown", event => {
-  const slide = event.target.closest(".carousel-slide");
+  stage.addEventListener("keydown", event => {
+    const slide = event.target.closest(".carousel-slide");
+    if (!slide || slide.classList.contains("is-active")) return;
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      jumpTo(Number(slide.dataset.index));
+    }
+  });
+}
 
-  if (!slide || slide.classList.contains("is-active")) return;
-
-  if (event.key === "Enter" || event.key === " ") {
-    event.preventDefault();
-    goTo(Number(slide.dataset.index));
-  }
-});
-
-// ---------- Lightbox and YouTube playback ----------
+// ---------- Lightbox: iframe is created only after Play ----------
 
 function pauseLightboxMedia() {
   if (!lightboxPlayer) return;
-
   const video = $("video", lightboxPlayer);
-
   if (video) {
     video.pause();
     video.removeAttribute("src");
     video.load();
   }
-
-  // Removing the iframe stops the embedded YouTube video.
   lightboxPlayer.replaceChildren();
 }
 
 function openLightbox(index) {
   const video = VIDEOS[index];
-
   if (!video || !lightbox || !lightboxPlayer) return;
-
   const embedUrl = getYouTubeEmbedUrl(video.src);
 
   if (video.type === "youtube" && !embedUrl) {
-    if (lightboxTitle) {
-      lightboxTitle.textContent = "Check YouTube video ID";
-    }
-
-    if (lightboxLabel) {
-      lightboxLabel.textContent =
-        "Replace the placeholder with a valid 11-character video ID.";
-    }
-
+    if (lightboxTitle) lightboxTitle.textContent = "Check YouTube video ID";
+    if (lightboxLabel) lightboxLabel.textContent = "A valid 11-character YouTube ID is required.";
     return;
   }
 
   lightboxReturnFocus = document.activeElement;
-
   pauseLightboxMedia();
-
-  lightboxTitle.textContent = video.title;
-
-  if (lightboxLabel) {
-    lightboxLabel.textContent = video.description || "TOBIUNPHASED / FILM";
-  }
+  if (lightboxTitle) lightboxTitle.textContent = video.title;
+  if (lightboxLabel) lightboxLabel.textContent = video.description || "TOBIUNPHASED / FILM";
 
   if (video.type === "youtube") {
     const iframe = document.createElement("iframe");
-
     iframe.src = embedUrl;
     iframe.title = video.title;
-    iframe.allow =
-      "accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share";
+    iframe.allow = "accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share";
     iframe.allowFullscreen = true;
     iframe.loading = "eager";
     iframe.referrerPolicy = "strict-origin-when-cross-origin";
-
-    iframe.style.display = "block";
-    iframe.style.width = "100%";
-    iframe.style.height = "100%";
-    iframe.style.aspectRatio = "16 / 9";
-    iframe.style.border = "0";
-
-    lightboxPlayer.appendChild(iframe);
+    iframe.style.cssText = "display:block;width:100%;height:100%;aspect-ratio:16/9;border:0";
+    lightboxPlayer.append(iframe);
   } else if (video.type === "mp4") {
-    // Kept as a fallback in case you intentionally use an MP4 later.
     const player = document.createElement("video");
-
     player.src = video.src;
     player.controls = true;
     player.autoplay = true;
     player.playsInline = true;
-
-    if (video.poster) {
-      player.poster = video.poster;
-    }
-
-    lightboxPlayer.appendChild(player);
+    if (video.poster) player.poster = video.poster;
+    lightboxPlayer.append(player);
   }
 
-  // Support both class names in case the existing CSS uses either one.
   lightbox.classList.add("open", "active");
   lightbox.setAttribute("aria-hidden", "false");
   document.body.classList.add("lightbox-open");
-
-  if (lightboxClose) {
-    lightboxClose.focus();
-  }
+  lightboxClose?.focus();
 }
 
 function closeLightbox() {
   if (!lightbox) return;
-
   pauseLightboxMedia();
-
   lightbox.classList.remove("open", "active");
   lightbox.setAttribute("aria-hidden", "true");
   document.body.classList.remove("lightbox-open");
-
-  if (
-    lightboxReturnFocus &&
-    typeof lightboxReturnFocus.focus === "function"
-  ) {
+  if (lightboxReturnFocus && typeof lightboxReturnFocus.focus === "function") {
     lightboxReturnFocus.focus();
   }
-
   lightboxReturnFocus = null;
 }
 
-if (lightboxClose) {
-  lightboxClose.addEventListener("click", closeLightbox);
-}
-
+if (lightboxClose) lightboxClose.addEventListener("click", closeLightbox);
 const lightboxBackdrop = $("[data-close-lightbox]", lightbox);
-
-if (lightboxBackdrop) {
-  lightboxBackdrop.addEventListener("click", event => {
-    // Close only when the backdrop itself is clicked.
-    if (event.target === lightboxBackdrop) {
-      closeLightbox();
-    }
-  });
-}
-
-document.addEventListener("keydown", event => {
-  if (event.key === "Escape") {
-    if (lightbox && lightbox.classList.contains("open")) {
-      closeLightbox();
-    } else if (mobileMenu && mobileMenu.classList.contains("open")) {
-      closeMobileMenu();
-    }
-  }
-
-  if (
-    event.key === "Tab" &&
-    lightbox &&
-    lightbox.classList.contains("open")
-  ) {
-    const focusable = $$(
-      "button, a, iframe, video",
-      lightbox
-    ).filter(element => !element.disabled);
-
-    if (!focusable.length) return;
-
-    const first = focusable[0];
-    const last = focusable[focusable.length - 1];
-
-    if (
-      event.shiftKey &&
-      document.activeElement === first
-    ) {
-      event.preventDefault();
-      last.focus();
-    } else if (
-      !event.shiftKey &&
-      document.activeElement === last
-    ) {
-      event.preventDefault();
-      first.focus();
-    }
-  }
+if (lightboxBackdrop) lightboxBackdrop.addEventListener("click", event => {
+  if (event.target === lightboxBackdrop) closeLightbox();
 });
 
-// ---------- Mobile navigation ----------
-
-function openMobileMenu() {
-  if (!mobileMenu) return;
-
-  mobileMenu.classList.add("open");
-  mobileMenu.setAttribute("aria-hidden", "false");
-
-  if (menuToggle) {
-    menuToggle.setAttribute("aria-expanded", "true");
-  }
-
-  document.body.classList.add("menu-open");
-
-  const firstLink = $("nav a", mobileMenu);
-
-  if (firstLink) {
-    firstLink.focus();
+function trapFocus(container, event) {
+  const focusable = $$("a[href], button:not([disabled]), [tabindex]:not([tabindex='-1'])", container)
+    .filter(element => element.getClientRects().length > 0);
+  if (!focusable.length) return;
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (event.shiftKey && (document.activeElement === first || !container.contains(document.activeElement))) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && (document.activeElement === last || !container.contains(document.activeElement))) {
+    event.preventDefault();
+    first.focus();
   }
 }
 
-function closeMobileMenu() {
-  if (!mobileMenu || !mobileMenu.classList.contains("open")) return;
+// ---------- Mobile navigation and focus management ----------
 
+function openMobileMenu() {
+  if (!mobileMenu || mobileMenu.classList.contains("open")) return;
+  menuReturnFocus = document.activeElement;
+  mobileMenu.classList.add("open");
+  mobileMenu.setAttribute("aria-hidden", "false");
+  menuToggle?.setAttribute("aria-expanded", "true");
+  menuToggle?.setAttribute("aria-label", "Close menu");
+  document.body.classList.add("menu-open");
+  $(".mobile-menu-links a", mobileMenu)?.focus();
+}
+
+function closeMobileMenu(restoreFocus = true) {
+  if (!mobileMenu || !mobileMenu.classList.contains("open")) return;
   mobileMenu.classList.remove("open");
   mobileMenu.setAttribute("aria-hidden", "true");
-
-  if (menuToggle) {
-    menuToggle.setAttribute("aria-expanded", "false");
-    menuToggle.focus();
-  }
-
+  menuToggle?.setAttribute("aria-expanded", "false");
+  menuToggle?.setAttribute("aria-label", "Open menu");
   document.body.classList.remove("menu-open");
+
+  if (restoreFocus) {
+    const target = menuReturnFocus && typeof menuReturnFocus.focus === "function"
+      ? menuReturnFocus
+      : menuToggle;
+    target?.focus();
+  }
+  menuReturnFocus = null;
 }
 
 if (menuToggle) {
-  menuToggle.addEventListener("click", openMobileMenu);
+  menuToggle.addEventListener("click", () => {
+    if (mobileMenu?.classList.contains("open")) closeMobileMenu();
+    else openMobileMenu();
+  });
+}
+if (menuClose) menuClose.addEventListener("click", () => closeMobileMenu());
+
+$$(".mobile-menu-links a", mobileMenu).forEach(link => {
+  link.addEventListener("click", () => closeMobileMenu(false));
+});
+
+// ---------- FAQ: one open at a time, animated height, hidden when closed ----------
+
+function closeFaq(button, panel) {
+  if (!button || !panel || panel.hidden) return;
+  button.setAttribute("aria-expanded", "false");
+  panel.style.height = `${panel.scrollHeight}px`;
+
+  if (prefersReducedMotion.matches) {
+    panel.hidden = true;
+    panel.style.height = "0px";
+    return;
+  }
+
+  void panel.offsetHeight;
+  panel.style.height = "0px";
 }
 
-if (menuClose) {
-  menuClose.addEventListener("click", closeMobileMenu);
-}
+function openFaq(button, panel) {
+  if (!button || !panel) return;
+  panel.hidden = false;
+  button.setAttribute("aria-expanded", "true");
+  panel.style.height = "0px";
 
-if (mobileMenu) {
-  $$(".mobile-menu-links a", mobileMenu).forEach(link => {
-    link.addEventListener("click", () => {
-      mobileMenu.classList.remove("open");
-      mobileMenu.setAttribute("aria-hidden", "true");
+  if (prefersReducedMotion.matches) {
+    panel.style.height = "auto";
+    return;
+  }
 
-      if (menuToggle) {
-        menuToggle.setAttribute("aria-expanded", "false");
-      }
-
-      document.body.classList.remove("menu-open");
-    });
+  requestAnimationFrame(() => {
+    panel.style.height = `${panel.scrollHeight}px`;
   });
 }
 
-// ---------- Discord copy button ----------
+$$ (".faq-question").forEach(button => {
+  const panelId = button.getAttribute("aria-controls");
+  const panel = panelId ? document.getElementById(panelId) : null;
+  if (!panel) return;
+
+  const expanded = button.getAttribute("aria-expanded") === "true";
+  panel.hidden = !expanded;
+  panel.style.overflow = "hidden";
+  panel.style.height = expanded ? "auto" : "0px";
+  panel.style.transition = prefersReducedMotion.matches ? "none" : "height 360ms ease";
+
+  button.addEventListener("click", () => {
+    const isOpen = button.getAttribute("aria-expanded") === "true";
+    if (isOpen) {
+      closeFaq(button, panel);
+      faqOpenButton = null;
+      return;
+    }
+
+    if (faqOpenButton && faqOpenButton !== button) {
+      const previousPanelId = faqOpenButton.getAttribute("aria-controls");
+      const previousPanel = previousPanelId ? document.getElementById(previousPanelId) : null;
+      closeFaq(faqOpenButton, previousPanel);
+    }
+
+    openFaq(button, panel);
+    faqOpenButton = button;
+  });
+
+  panel.addEventListener("transitionend", event => {
+    if (event.propertyName !== "height") return;
+    if (button.getAttribute("aria-expanded") === "true") {
+      panel.style.height = "auto";
+    } else {
+      panel.hidden = true;
+    }
+  });
+
+  if (expanded) faqOpenButton = button;
+});
+
+// ---------- Discord copy ----------
 
 if (copyButton) {
   copyButton.addEventListener("click", async () => {
     let copied = false;
-
     try {
-      await navigator.clipboard.writeText(DISCORD_USERNAME);
-      copied = true;
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(DISCORD_USERNAME);
+        copied = true;
+      } else {
+        throw new Error("Clipboard API unavailable");
+      }
     } catch {
-      // Fallback for browsers without Clipboard API access.
       const input = document.createElement("textarea");
-
       input.value = DISCORD_USERNAME;
       input.setAttribute("readonly", "");
       input.style.position = "fixed";
       input.style.opacity = "0";
-
       document.body.append(input);
       input.select();
-
-      copied = document.execCommand("copy");
+      try {
+        copied = document.execCommand("copy");
+      } catch {
+        copied = false;
+      }
       input.remove();
     }
 
-    if (copyLabel) {
-      copyLabel.textContent = copied ? "COPIED ✓" : "COPY ↗";
-    }
-
+    if (copyLabel) copyLabel.textContent = copied ? "COPIED ✓" : "COPY ↗";
     if (copyFeedback) {
-      copyFeedback.textContent = copied
-        ? "Username copied"
-        : "Copy unavailable — tobiunphased";
+      copyFeedback.textContent = copied ? "Username copied" : "Copy unavailable — tobiunphased";
     }
 
     window.setTimeout(() => {
@@ -852,85 +737,168 @@ if (copyButton) {
   });
 }
 
-// ---------- Scroll effects ----------
+// ---------- Scroll progress and sticky header ----------
 
 function updateScrollEffects() {
-  const scrollable =
-    document.documentElement.scrollHeight - window.innerHeight;
-
-  const progress =
-    scrollable > 0 ? (window.scrollY / scrollable) * 100 : 0;
-
-  if (progressBar) {
-    progressBar.style.width = `${progress}%`;
-  }
-
-  if (header) {
-    header.classList.toggle("scrolled", window.scrollY > 20);
-  }
+  const scrollable = document.documentElement.scrollHeight - window.innerHeight;
+  const progress = scrollable > 0 ? (window.scrollY / scrollable) * 100 : 0;
+  if (progressBar) progressBar.style.width = `${Math.min(100, Math.max(0, progress))}%`;
+  if (header) header.classList.toggle("scrolled", window.scrollY > 20);
+  scrollTicking = false;
 }
 
-window.addEventListener("scroll", updateScrollEffects, {
-  passive: true
-});
-
+window.addEventListener("scroll", () => {
+  if (!scrollTicking) {
+    window.requestAnimationFrame(updateScrollEffects);
+    scrollTicking = true;
+  }
+}, { passive: true });
+window.addEventListener("resize", updateScrollEffects, { passive: true });
 updateScrollEffects();
 
-// ---------- Reveal sections ----------
+// ---------- Reveal-on-scroll with staggered card delays ----------
+
+const staggerGroups = [".pillar-card", ".process-step", ".service-card", ".faq-item"];
+staggerGroups.forEach(selector => {
+  $$(selector).forEach((element, index) => {
+    element.style.transitionDelay = `${Math.min(index, 5) * 90}ms`;
+  });
+});
 
 if ("IntersectionObserver" in window) {
-  const revealObserver = new IntersectionObserver(
-    entries => {
-      entries.forEach(entry => {
-        if (entry.isIntersecting) {
-          entry.target.classList.add("visible");
-          revealObserver.unobserve(entry.target);
-        }
-      });
-    },
-    { threshold: 0.12 }
-  );
+  const revealObserver = new IntersectionObserver(entries => {
+    entries.forEach(entry => {
+      if (!entry.isIntersecting) return;
+      entry.target.classList.add("visible");
+      revealObserver.unobserve(entry.target);
+    });
+  }, { threshold: 0.12, rootMargin: "0px 0px -35px 0px" });
 
-  $$(".reveal").forEach(element => {
-    revealObserver.observe(element);
-  });
+  $$(".reveal").forEach(element => revealObserver.observe(element));
 } else {
-  $$(".reveal").forEach(element => {
-    element.classList.add("visible");
-  });
+  $$(".reveal").forEach(element => element.classList.add("visible"));
 }
 
-// ---------- Custom cursor ----------
+// ---------- Process connector progress ----------
 
-if (cursorDot && window.matchMedia("(pointer: fine)").matches) {
-  window.addEventListener(
-    "mousemove",
-    event => {
-      cursorDot.style.opacity = "0.65";
-      cursorDot.style.transform =
-        `translate(${event.clientX - 2}px, ${event.clientY - 2}px)`;
-    },
-    { passive: true }
-  );
+const processGrid = $(".process-grid");
+if (processGrid && "IntersectionObserver" in window) {
+  const processObserver = new IntersectionObserver(entries => {
+    entries.forEach(entry => {
+      if (!entry.isIntersecting) return;
+      processGrid.classList.add("process-visible", "is-active");
+      processObserver.unobserve(processGrid);
+    });
+  }, { threshold: 0.2 });
+  processObserver.observe(processGrid);
+} else if (processGrid) {
+  processGrid.classList.add("process-visible", "is-active");
+}
+
+// ---------- Active navigation state ----------
+
+const navLinks = $$(".nav-links a");
+const observedSections = navLinks
+  .map(link => document.querySelector(link.getAttribute("href")))
+  .filter(Boolean);
+
+if ("IntersectionObserver" in window && observedSections.length) {
+  const activeSectionObserver = new IntersectionObserver(entries => {
+    const visible = entries
+      .filter(entry => entry.isIntersecting)
+      .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
+    if (!visible) return;
+
+    navLinks.forEach(link => {
+      const active = link.getAttribute("href") === `#${visible.target.id}`;
+      if (active) link.classList.add("active");
+      else link.classList.remove("active");
+      if (active) link.setAttribute("aria-current", "location");
+      else link.removeAttribute("aria-current");
+    });
+  }, {
+    rootMargin: "-25% 0px -60% 0px",
+    threshold: [0, 0.1, 0.25, 0.5]
+  });
+
+  observedSections.forEach(section => activeSectionObserver.observe(section));
+}
+
+// ---------- Hero portrait parallax (desktop pointer only) ----------
+
+const heroPortraitImage = $(".hero-portrait img");
+if (heroPortraitImage && !prefersReducedMotion.matches && finePointer.matches) {
+  let parallaxTicking = false;
+  const updateParallax = () => {
+    const bounds = heroPortraitImage.getBoundingClientRect();
+    if (bounds.bottom > 0 && bounds.top < window.innerHeight) {
+      const offset = Math.min(16, Math.max(-16, (bounds.top - window.innerHeight * 0.45) * -0.025));
+      heroPortraitImage.style.transform = `translate3d(0, ${offset}px, 0) scale(1.025)`;
+    }
+    parallaxTicking = false;
+  };
+  window.addEventListener("scroll", () => {
+    if (!parallaxTicking) {
+      requestAnimationFrame(updateParallax);
+      parallaxTicking = true;
+    }
+  }, { passive: true });
+  updateParallax();
+}
+
+// ---------- Custom cursor dot ----------
+
+if (cursorDot && finePointer.matches && !prefersReducedMotion.matches) {
+  window.addEventListener("mousemove", event => {
+    cursorDot.style.opacity = "0.65";
+    cursorDot.style.transform = `translate(${event.clientX - 2}px, ${event.clientY - 2}px)`;
+  }, { passive: true });
 
   document.addEventListener("mouseleave", () => {
     cursorDot.style.opacity = "0";
   });
 }
 
-// ---------- Initialize ----------
+// ---------- Global keyboard handling and focus traps ----------
+
+document.addEventListener("keydown", event => {
+  if (event.key === "Escape") {
+    if (lightbox?.classList.contains("open")) closeLightbox();
+    else if (mobileMenu?.classList.contains("open")) closeMobileMenu();
+  }
+
+  if (event.key !== "Tab") return;
+  if (mobileMenu?.classList.contains("open")) {
+    trapFocus(mobileMenu, event);
+  } else if (lightbox?.classList.contains("open")) {
+    trapFocus(lightbox, event);
+  }
+});
+
+// ---------- Button micro-interaction ----------
+
+if (!prefersReducedMotion.matches && finePointer.matches) {
+  $$(".button, .nav-cta").forEach(button => {
+    button.addEventListener("pointermove", event => {
+      const rect = button.getBoundingClientRect();
+      const x = (event.clientX - rect.left - rect.width / 2) * 0.025;
+      const y = (event.clientY - rect.top - rect.height / 2) * 0.055;
+      button.style.transform = `translate(${x}px, ${y}px)`;
+    });
+    button.addEventListener("pointerleave", () => button.style.removeProperty("transform"));
+  });
+}
+
+// ---------- Initialize carousel ----------
 
 if (!VIDEOS.length) {
   if (carousel) carousel.hidden = true;
 } else if (
-  carousel &&
-  stage &&
-  indicators &&
-  currentCounter &&
-  totalCounter &&
-  prevButton &&
-  nextButton
+  carousel && stage && indicators && currentCounter && totalCounter && prevButton && nextButton
 ) {
   createIndicators();
   renderInitialSlides();
 }
+
+// Recalculate the banner offset after layout and fonts settle.
+window.addEventListener("load", setBannerHeight, { once: true });
