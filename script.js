@@ -26,9 +26,9 @@ const VIDEOS = [
     type: "youtube"
   },
   {
-    title: "Minecraft Cinematic",
-    description: "i'm going back to 505.",
-    src: "r_hkoqetm_8",
+    title: "GTA 5 Transition",
+    description: "Recreation of the iconic GTA 5 maps transition.",
+    src: "iy298Vb7NaE",
     type: "youtube"
   }
 ];
