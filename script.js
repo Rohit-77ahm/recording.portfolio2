@@ -17,14 +17,14 @@ const VIDEOS = [
   },
   {
     title: "Minecraft Film",
-    description: "Captured moments from another perspective.",
+    description: "A film with still camera shots.",
     src: "Zaad-IAgaB8",
     type: "youtube"
   },
   {
-    title: "Minecraft Cinematic",
-    description: "Captured moments from another perspective.",
-    src: "SAARxlMABgk",
+    title: "Dolly Zooms",
+    description: "Industry Grade zooms",
+    src: "TP42mYGlMJk",
     type: "youtube"
   },
   {
