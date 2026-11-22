@@ -13,6 +13,12 @@ const VIDEOS = [
     src: "ZLHp3N7IjsI",
     type: "youtube"
   },
+    {
+    title: "Build Showcase",
+    description: "Creative builds brought to life through cinematic visuals, smooth transitions, and carefully crafted shots.",
+    src: "80W9d3EG2FU",
+    type: "youtube"
+  },
   {
     title: "Minecraft Film",
     description: "A film with still camera shots.",
